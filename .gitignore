@@ -1,0 +1,6 @@
+*.onnx
+*.pt
+*.tgz
+*.tar.gz
+onnxruntime-linux-x64-*/
+venv/

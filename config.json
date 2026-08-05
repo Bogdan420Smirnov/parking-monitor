@@ -1,0 +1,16 @@
+{
+  "cameras": [
+    {
+      "id": "cam1",
+      "name": "Северный въезд",
+      "rtsp_url": "rtsp://localhost:8554/cam1",
+      "spots": [
+        { "id": 1, "label": "Место A1", "rect": [100, 200, 300, 400] },
+        { "id": 2, "label": "Место A2", "rect": [350, 200, 550, 400] }
+      ]
+    }
+  ],
+  "detection_interval_ms": 500,
+  "occupancy_timeout_sec": 10,
+  "iou_threshold": 0.5
+}
