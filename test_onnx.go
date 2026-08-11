@@ -6,9 +6,11 @@ import (
 	onnx "github.com/yalue/onnxruntime_go"
 )
 
+
+
 func main() {
 	// Указываем полный путь к библиотеке
-	onnx.SetSharedLibraryPath("/usr/local/lib/libonnxruntime.so")
+	onnx.SetSharedLibraryPath("C:/onnxruntime/onnxruntime-win-x64-1.28.0/lib/onnxruntime.dll")
 
 	err := onnx.InitializeEnvironment()
 	if err != nil {
