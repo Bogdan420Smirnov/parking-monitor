@@ -93,7 +93,7 @@ func (d *YOLODetector) Close() error {
 }
 
 func (d *YOLODetector) Detect(img image.Image) ([]Detection, error) {
-	err := d.preprocessInto(img)
+	err := d.preprocess(img)
 	if err != nil {
 		return nil, fmt.Errorf("preprocessing failed: %w", err)
 	}
@@ -106,7 +106,7 @@ func (d *YOLODetector) Detect(img image.Image) ([]Detection, error) {
 	return detections, nil
 }
 
-func (d *YOLODetector) preprocessInto(img image.Image) error {
+func (d *YOLODetector) preprocess(img image.Image) error {
 	width := modelInputWidth
 	height := modelInputHeight
 	scaled := image.NewRGBA(image.Rect(0, 0, width, height))
