@@ -5,12 +5,12 @@
       "name": "Северный въезд",
       "rtsp_url": "rtsp://localhost:8554/cam1",
       "spots": [
-        { "id": 1, "label": "Место A1", "rect": [443, 520, 747, 567] },
-        { "id": 2, "label": "Место A2", "rect": [1040, 363, 1087, 493] }
+        { "id": 1, "label": "Место A1", "rect": [0, 0, 1280, 720] },
+        { "id": 2, "label": "Место A2", "rect": [0, 0, 1280, 720] }
       ]
     }
   ],
   "detection_interval_ms": 500,
   "occupancy_timeout_sec": 10,
-  "iou_threshold": 0.5
+  "iou_threshold": 0.1
 }

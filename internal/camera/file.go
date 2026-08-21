@@ -1,9 +1,13 @@
 package camera
 
 import (
+	"encoding/json"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"io"
+	"log"
+	"os"
 	"os/exec"
 	"sync"
 )
@@ -17,12 +21,43 @@ type FileCamera struct {
 	width  int
 	height int
 	closed bool
+	saved  bool
 }
 
-// NewFileCamera создаёт камеру для чтения видеофайла через ffmpeg
+func probeVideo(filePath string) (int, int, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height", "-of", "json", filePath)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	var data struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &data); err != nil {
+		return 0, 0, err
+	}
+	if len(data.Streams) == 0 {
+		return 0, 0, nil
+	}
+	return data.Streams[0].Width, data.Streams[0].Height, nil
+}
+
 func NewFileCamera(filePath string) (*FileCamera, error) {
-	// Используем rgb24, чтобы получить каналы в порядке R,G,B
-	cmd := exec.Command("ffmpeg", "-i", filePath, "-f", "rawvideo", "-pix_fmt", "rgb24", "-")
+	width, height, err := probeVideo(filePath)
+	if err != nil {
+		width, height = 1280, 720
+	}
+
+	// Простая команда, без лишних флагов
+	cmd := exec.Command("ffmpeg",
+		"-i", filePath,
+		"-f", "rawvideo",
+		"-pix_fmt", "rgb24",
+		"-")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -31,11 +66,7 @@ func NewFileCamera(filePath string) (*FileCamera, error) {
 		return nil, err
 	}
 
-	// Узнаём разрешение видео (можно сделать через ffprobe, но пока зададим явно)
-	// Если у вас другое разрешение, укажите его здесь
-	width, height := 1280, 720
 	frame := image.NewRGBA(image.Rect(0, 0, width, height))
-
 	c := &FileCamera{
 		path:   filePath,
 		cmd:    cmd,
@@ -49,17 +80,47 @@ func NewFileCamera(filePath string) (*FileCamera, error) {
 }
 
 func (c *FileCamera) loop() {
-	buf := make([]byte, c.width*c.height*3) // 3 байта на пиксель (RGB)
+	frameSize := c.width * c.height * 3
+	buf := make([]byte, frameSize)
+	log.Printf("Camera loop started, frameSize=%d", frameSize)
+
 	for {
-		n, err := c.stdout.Read(buf)
-		if err != nil {
-			break
+		// Читаем ровно один кадр
+		n := 0
+		for n < frameSize {
+			read, err := c.stdout.Read(buf[n:])
+			if err != nil {
+				if err == io.EOF {
+					log.Println("EOF reached")
+					return
+				}
+				log.Printf("Read error: %v", err)
+				return
+			}
+			if read == 0 {
+				log.Println("Read 0 bytes")
+				return
+			}
+			n += read
 		}
-		if n != len(buf) {
-			continue // неполный кадр, пропускаем
+		log.Printf("Read full frame, n=%d", n)
+
+		// Проверяем, не пустой ли кадр
+		empty := true
+		for i := 0; i < 10 && i < frameSize; i++ {
+			if buf[i] != 0 {
+				empty = false
+				break
+			}
 		}
+		if empty {
+			log.Println("Empty frame, skipping")
+			continue
+		}
+
 		c.mu.Lock()
 		img := c.frame
+		// rgb24 -> RGBA
 		for y := 0; y < c.height; y++ {
 			for x := 0; x < c.width; x++ {
 				idx := (y*c.width + x) * 3
@@ -70,23 +131,33 @@ func (c *FileCamera) loop() {
 			}
 		}
 		c.mu.Unlock()
+
+		// Сохраняем первый кадр
+		if !c.saved {
+			c.saved = true
+			outFile, err := os.Create("test_from_go.jpg")
+			if err == nil {
+				jpeg.Encode(outFile, img, &jpeg.Options{Quality: 90})
+				outFile.Close()
+				log.Println("Saved first frame to test_from_go.jpg")
+			} else {
+				log.Printf("Failed to save frame: %v", err)
+			}
+		}
 	}
 }
 
-// ReadFrame возвращает последний кадр
 func (c *FileCamera) ReadFrame() image.Image {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.frame == nil {
 		return nil
 	}
-	// Возвращаем копию
 	dup := image.NewRGBA(c.frame.Bounds())
 	copy(dup.Pix, c.frame.Pix)
 	return dup
 }
 
-// Close останавливает ffmpeg
 func (c *FileCamera) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
