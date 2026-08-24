@@ -136,6 +136,7 @@ func (c *FileCamera) loop() {
 		if !c.saved {
 			c.saved = true
 			outFile, err := os.Create("test_from_go.jpg")
+
 			if err == nil {
 				jpeg.Encode(outFile, img, &jpeg.Options{Quality: 90})
 				outFile.Close()

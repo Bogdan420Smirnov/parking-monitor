@@ -3,11 +3,18 @@ package detector
 import (
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
+	//"image/jpeg"
 	"math"
 	"sort"
+	//"log"
+	//"os"
+	"github.com/nfnt/resize"
 
 	onnx "github.com/yalue/onnxruntime_go"
-	"golang.org/x/image/draw"
+	//"golang.org/x/image/draw"
+	//"github.com/fogleman/gg"
 )
 
 type Detection struct {
@@ -107,24 +114,61 @@ func (d *YOLODetector) Detect(img image.Image) ([]Detection, error) {
 }
 
 func (d *YOLODetector) preprocess(img image.Image) error {
-	width := modelInputWidth
-	height := modelInputHeight
-	scaled := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), img, img.Bounds(), draw.Over, nil)
 	data := d.inputTensor.GetData()//.([]float32)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			r, g, b, _ := scaled.At(x, y).RGBA()
-			idx := y*width + x
-			data[idx] = float32(b>>8) / 255.0
-			data[width*height+idx] = float32(g>>8) / 255.0
-			data[2*width*height+idx] = float32(r>>8) / 255.0
-		}
-	}
-	return nil
-}
+	//width := modelInputWidth
+	//height := modelInputHeight
+	channelSize := modelInputHeight * modelInputWidth
 
-func (d *YOLODetector) postprocess(outputData []float32) []Detection {
+	if len(data) < (channelSize * 3) {
+        return fmt.Errorf("destination tensor only holds %d floats, needs %d (make sure it's the right shape!)", len(data), channelSize*3)
+    }
+	redChannel := data[0:channelSize]
+    greenChannel := data[channelSize : channelSize*2]
+    blueChannel := data[channelSize*2 : channelSize*3]
+
+	srcBounds := img.Bounds()
+    srcW := srcBounds.Dx()
+    srcH := srcBounds.Dy()
+
+    // Вычисляем масштаб для вписывания в 640x640
+    scale := math.Min(float64(640)/float64(srcW), float64(640)/float64(srcH))
+    newW := int(float64(srcW) * scale)
+    newH := int(float64(srcH) * scale)
+
+    // Изменяем размер с сохранением пропорций
+    resized := resize.Resize(uint(newW), uint(newH), img, resize.Lanczos3)
+
+    // Создаём холст 640x640 с серым фоном (значение 114 для YOLO)
+    dstImg := image.NewRGBA(image.Rect(0, 0, 640, 640))
+    gray := color.RGBA{114, 114, 114, 255}
+    draw.Draw(dstImg, dstImg.Bounds(), &image.Uniform{gray}, image.Point{}, draw.Src)
+
+    // Вставляем изменённое изображение по центру
+    xOffset := (640 - newW) / 2
+    yOffset := (640 - newH) / 2
+    draw.Draw(dstImg, image.Rect(xOffset, yOffset, xOffset+newW, yOffset+newH), resized, image.Point{}, draw.Src)
+
+    // Сохраняем параметры для постобработки (глобальные переменные)
+    /* letterboxXOffset = xOffset
+    letterboxYOffset = yOffset
+    letterboxScale = scale */
+
+    // Заполняем тензор из LetterBox-изображения
+    i := 0
+    for y := 0; y < 640; y++ {
+        for x := 0; x < 640; x++ {
+            r, g, b, _ := dstImg.At(x, y).RGBA()
+            redChannel[i] = float32(r>>8) / 255.0
+            greenChannel[i] = float32(g>>8) / 255.0
+            blueChannel[i] = float32(b>>8) / 255.0
+            i++
+        }
+    }
+
+    return nil
+} 
+
+/* func (d *YOLODetector) postprocess(outputData []float32) []Detection {
 	const iouThreshold = 0.45
 	confThreshold := d.confThreshold
 	var detections []Detection
@@ -156,6 +200,53 @@ func (d *YOLODetector) postprocess(outputData []float32) []Detection {
 		}
 	}
 	return nonMaxSuppression(detections, iouThreshold)
+} */
+
+
+
+func (d *YOLODetector) postprocess(outputData []float32) []Detection {
+    const numClasses = 80
+    const confThreshold = 0.5
+    const iouThreshold = 0.45
+
+    numPredictions := 8400
+    var detections []Detection
+
+    // Предполагаем порядок [каналы, предсказания]
+    for idx := 0; idx < numPredictions; idx++ {
+        // Извлекаем координаты (нормализованные относительно 640x640)
+        cx := outputData[idx]                       // канал 0
+        cy := outputData[8400+idx]                  // канал 1
+        w := outputData[2*8400+idx]                 // канал 2
+        h := outputData[3*8400+idx]                 // канал 3
+
+        // Находим класс с максимальной вероятностью
+        maxScore := float32(0.0)
+        classID := 0
+        for col := 0; col < numClasses; col++ {
+            score := outputData[4*8400 + col*8400 + idx]
+            if score > maxScore {
+                maxScore = score
+                classID = col
+            }
+        }
+
+        if classID == 2 && maxScore > confThreshold {
+            // Преобразуем в [x1, y1, x2, y2] в координатах 640x640
+            x1 := cx - w/2
+            y1 := cy - h/2
+            x2 := cx + w/2
+            y2 := cy + h/2
+            detections = append(detections, Detection{
+                Bbox:  [4]float32{x1, y1, x2, y2},
+                Class: classID,
+                Score: maxScore,
+            })
+        }
+    }
+
+    // NMS
+    return nonMaxSuppression(detections, iouThreshold)
 }
 
 func nonMaxSuppression(detections []Detection, iouThreshold float32) []Detection {
