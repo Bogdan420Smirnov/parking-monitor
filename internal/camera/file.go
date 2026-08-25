@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
-	"image/jpeg"
 	"io"
-	"log"
-	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 type FileCamera struct {
@@ -21,7 +19,6 @@ type FileCamera struct {
 	width  int
 	height int
 	closed bool
-	saved  bool
 }
 
 func probeVideo(filePath string) (int, int, error) {
@@ -52,11 +49,12 @@ func NewFileCamera(filePath string) (*FileCamera, error) {
 		width, height = 1280, 720
 	}
 
-	// Простая команда, без лишних флагов
+	// Зацикливаем видео с помощью -stream_loop -1
 	cmd := exec.Command("ffmpeg",
+		"-stream_loop", "-1",
 		"-i", filePath,
 		"-f", "rawvideo",
-		"-pix_fmt", "rgb24",
+		"-pix_fmt", "bgr24",
 		"-")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -82,8 +80,6 @@ func NewFileCamera(filePath string) (*FileCamera, error) {
 func (c *FileCamera) loop() {
 	frameSize := c.width * c.height * 3
 	buf := make([]byte, frameSize)
-	log.Printf("Camera loop started, frameSize=%d", frameSize)
-
 	for {
 		// Читаем ровно один кадр
 		n := 0
@@ -91,19 +87,18 @@ func (c *FileCamera) loop() {
 			read, err := c.stdout.Read(buf[n:])
 			if err != nil {
 				if err == io.EOF {
-					log.Println("EOF reached")
-					return
+					// Если EOF, то ffmpeg перезапустится автоматически из-за -stream_loop -1
+					// Но на всякий случай подождём и продолжим
+					time.Sleep(100 * time.Millisecond)
+					continue
 				}
-				log.Printf("Read error: %v", err)
 				return
 			}
 			if read == 0 {
-				log.Println("Read 0 bytes")
 				return
 			}
 			n += read
 		}
-		log.Printf("Read full frame, n=%d", n)
 
 		// Проверяем, не пустой ли кадр
 		empty := true
@@ -114,37 +109,24 @@ func (c *FileCamera) loop() {
 			}
 		}
 		if empty {
-			log.Println("Empty frame, skipping")
 			continue
 		}
 
 		c.mu.Lock()
 		img := c.frame
-		// rgb24 -> RGBA
 		for y := 0; y < c.height; y++ {
 			for x := 0; x < c.width; x++ {
 				idx := (y*c.width + x) * 3
-				r := buf[idx]
+				b := buf[idx]
 				g := buf[idx+1]
-				b := buf[idx+2]
+				r := buf[idx+2]
 				img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 		c.mu.Unlock()
 
-		// Сохраняем первый кадр
-		if !c.saved {
-			c.saved = true
-			outFile, err := os.Create("test_from_go.jpg")
-
-			if err == nil {
-				jpeg.Encode(outFile, img, &jpeg.Options{Quality: 90})
-				outFile.Close()
-				log.Println("Saved first frame to test_from_go.jpg")
-			} else {
-				log.Printf("Failed to save frame: %v", err)
-			}
-		}
+		// Задержка для имитации FPS (~30 fps)
+		time.Sleep(33 * time.Millisecond)
 	}
 }
 
