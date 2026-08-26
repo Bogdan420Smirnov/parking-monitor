@@ -49,9 +49,10 @@ func NewFileCamera(filePath string) (*FileCamera, error) {
 		width, height = 1280, 720
 	}
 
-	// Зацикливаем видео с помощью -stream_loop -1
+	
 	cmd := exec.Command("ffmpeg",
-		"-stream_loop", "-1",
+		"-rtsp_transport", "tcp",
+		//"-stream_loop", "-1",
 		"-i", filePath,
 		"-f", "rawvideo",
 		"-pix_fmt", "bgr24",

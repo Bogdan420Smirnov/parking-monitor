@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Мониторинг парковки</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+        h1 { color: #333; }
+        .cameras { display: flex; flex-wrap: wrap; gap: 20px; }
+        .camera-block { flex: 1; min-width: 600px; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .video { background: #000; }
+        .video img { width: 100%; }
+        .statuses table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .statuses th, .statuses td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        .statuses .free { color: green; font-weight: bold; }
+        .statuses .occupied { color: red; font-weight: bold; }
+        .statuses .pending { color: orange; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Мониторинг парковки</h1>
+    <div class="cameras">
+        {{range .Cameras}}
+        <div class="camera-block" data-camera="{{.}}">
+            <h2>Камера {{.}}</h2>
+            <div class="video">
+                <img src="/stream?camera={{.}}" alt="Видео {{.}}"/>
+            </div>
+            <div class="statuses">
+                <h3>Статусы мест</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Место</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody id="status-{{.}}">
+                        <tr><td colspan="2">Ожидание данных...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{end}}
+    </div>
+
+    <script>
+        const evtSource = new EventSource('/events');
+        evtSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                updateStatuses(data.camera_id, data.statuses);
+            } catch(e) {
+                console.error('Parse error', e);
+            }
+        };
+        evtSource.onerror = function(e) {
+            console.error('SSE error', e);
+        };
+
+        function updateStatuses(cameraID, statuses) {
+            const tbody = document.getElementById('status-' + cameraID);
+            if (!tbody) return;
+            const ids = Object.keys(statuses);
+            if (ids.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2">Нет данных</td></tr>';
+                return;
+            }
+            let html = '';
+            ids.sort((a,b) => parseInt(a) - parseInt(b));
+            for (const id of ids) {
+                const status = statuses[id];
+                const cssClass = status.toLowerCase();
+                html += `<tr>
+                    <td>Место ${id}</td>
+                    <td class="${cssClass}">${status}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
